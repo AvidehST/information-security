@@ -7,62 +7,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <openssl/bn.h>
-#include <openssl/dh.h>
-#include <openssl/bio.h>
 #include "settings.h"
+#include "connection.h"
 #include "utils.h"
-
-int setupServerSocket()
-{
-    int serverSocket = 0;
-
-    if ((serverSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-        printf("ERROR: Failed to create socket! Error: %s\n", strerror(errno));
-        exit(EXIT_FAILURE);
-    }
-    
-    struct sockaddr_in serverAddress;
-    memset(&serverAddress, '0', sizeof(serverAddress));
-
-    serverAddress.sin_family = AF_INET;
-    serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-    serverAddress.sin_port = htons(SERVER_PORT);
-
-    if (bind(serverSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == -1) {
-        printf("ERROR: Failed to bind socket! Error: %s\n", strerror(errno));
-        shutdown(serverSocket, SHUT_RDWR);
-        close(serverSocket);
-        exit(EXIT_FAILURE);
-    }
-    if (listen(serverSocket, 10) == -1) {
-        printf("ERROR: Failed to set socket to listen mode! Error: %s\n", strerror(errno));
-        shutdown(serverSocket, SHUT_RDWR);
-        close(serverSocket);
-        exit(EXIT_FAILURE);
-    }
-
-    return serverSocket;
-}
-
-int performServerSideHandshake(int clientSocket)
-{
-    char *buffer = NULL;
-
-    if (receiveString(clientSocket, &buffer) <= 0)
-    {
-        return -1;
-    }
-
-    if (strcmp(buffer, HANDSHAKE_INIT) != 0)
-    {
-        return -1;
-    }
-    
-    sendString(clientSocket, HANDSHAKE_ACK);
-
-    return 0;
-}
 
 int main(int argc, char *argv[])
 {
@@ -70,13 +17,7 @@ int main(int argc, char *argv[])
     
     // Setup server socket
     printf("Starting server ...\n");
-    serverSocket = setupServerSocket();
-
-    // Create buffers
-    char sendBuffer[1025];
-    char recvBuffer[1025];
-
-    memset(sendBuffer, '0', sizeof(sendBuffer));
+    serverSocket = setupServerSocket(SERVER_PORT);
 
 
     while(1)
@@ -98,12 +39,13 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        // Diffie-Helmann
+        // Diffie-Hellman
         unsigned char *sharedKey;
+        int sharedKeySize;
 
-        if (performServerSideDiffieHelmann(clientSocket, &sharedKey) == -1)
+        if ((sharedKeySize = performServerSideDiffieHellman(clientSocket, &sharedKey)) == -1)
         {
-            printf("ERROR: Diffie-Helmann protocol failed!");
+            printf("ERROR: Diffie-Hellman protocol failed!");
             return EXIT_FAILURE;
         }
         

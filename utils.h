@@ -4,78 +4,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/poll.h>
-#include <sys/ioctl.h>
+#include <openssl/bn.h>
+#include <openssl/dh.h>
+#include <openssl/bio.h>
+#include <openssl/err.h>
 
-/* Read/Write */
-
-int receiveString(int socket, char **buffer)
-{
-    struct pollfd pollData[] = {{socket, POLLIN, 0}};
-    int i, pollRes, bytesRead = 0, availBytes = 0;
-    char *newBuffer;
-
-    *buffer = NULL;
-    while (1) {
-        pollData[0].revents = 0;
-        pollRes = poll(pollData, 1, 3000);
-
-        if (pollRes <= 0)
-        {
-            free(*buffer);
-            *buffer = NULL;
-            printf("ERROR: Failed to read from socket! Error: %s\n", pollRes ? strerror(errno) : strerror(ETIMEDOUT));
-            return -1;
-        }
-
-        if (pollData[0].revents != POLLIN || recv(socket, &i, 1, MSG_DONTWAIT | MSG_PEEK) == 0 || ioctl(socket, FIONREAD, &availBytes) == -1)
-        {
-            free(*buffer);
-            *buffer = NULL;
-            printf("ERROR: Failed to read from socket! Error: %s\n", strerror(ECONNRESET));
-            return -2;
-        }
-
-        if (availBytes == 0) 
-            continue;
-
-        if (!(newBuffer = (char*)realloc(*buffer, bytesRead + availBytes))) {
-            free(*buffer);
-            *buffer = NULL;
-            printf("ERROR: Out of memory (%d bytes)!\n", bytesRead + availBytes);
-            return -3;
-        }
-
-        *buffer = newBuffer;
-        for (i = bytesRead; i < bytesRead + availBytes; ++i)
-        {
-            if (read(socket, &(*buffer)[i], 1) < 1)
-            {
-                free(*buffer);
-                *buffer = NULL;
-                printf("ERROR: Failed to read from socket! Error: %s\n", strerror(errno));
-                return -4;
-            }
-            if ((*buffer)[i] == '\0') 
-                return i;
-        }
-        bytesRead += availBytes;
-    }
-    return 0;
-}
-
-int sendString(const int socket, const char* const buffer)
-{
-    int res;
-
-    if ((res = write(socket, buffer, strlen(buffer) + 1)) == -1)
-        printf("ERROR: Failed to write to socket! Error: %s\n", strerror(errno));
-
-    return res;
-}
-
-/* Diffie-Helmann */
-int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
+/* Diffie-Hellman */
+int performServerSideDiffieHellman(int socket, unsigned char **sharedKey)
 {
     DH *dh = DH_new();
     char *buffer = NULL;
@@ -89,7 +24,7 @@ int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
 
     if (!BN_hex2bn(&dh->p, buffer))
     {
-        printf("ERROR: Failed to convert prime number to BigNum! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to convert prime number to BigNum! Error: %lu\n", ERR_get_error());
         free(buffer);
         DH_free(dh);
         return -1;
@@ -106,7 +41,7 @@ int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
     }
 
     if (!BN_hex2bn(&dh->g, buffer)) {
-        printf("ERROR: Failed to convert generator to BigNum! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to convert generator to BigNum! Error: %lu\n", ERR_get_error());
         free(buffer);
         DH_free(dh);
         return -1;
@@ -135,7 +70,7 @@ int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
 
     if (!BN_hex2bn(&clientPublicKey, buffer))
     {
-        printf("ERROR: Failed to convert public key to BigNum! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to convert public key to BigNum! Error: %lu\n", ERR_get_error());
         free(buffer);
         DH_free(dh);
         return -1;
@@ -166,7 +101,7 @@ int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
 
     if (sharedKeySize == -1)
     {
-        printf("ERROR: Failed to generate shared key! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to generate shared key! Error: %lu\n", ERR_get_error());
         free(buffer);
         BN_free(clientPublicKey);
         DH_free(dh);
@@ -178,10 +113,10 @@ int performServerSideDiffieHelmann(int socket, unsigned char **sharedKey)
     BN_free(clientPublicKey);
     DH_free(dh);
 
-    return 0;
+    return sharedKeySize;
 }
 
-int performClientSideDiffieHelmann(int socket, unsigned char **sharedKey)
+int performClientSideDiffieHellman(int socket, unsigned char **sharedKey)
 {
     DH *dh;
 
@@ -227,7 +162,7 @@ int performClientSideDiffieHelmann(int socket, unsigned char **sharedKey)
 
     if (!BN_hex2bn(&serverPublicKey, buffer))
     {
-        printf("ERROR: Failed to convert public key to BigNum! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to convert public key to BigNum! Error: %lu\n", ERR_get_error());
         return -1;
     }
 
@@ -246,7 +181,7 @@ int performClientSideDiffieHelmann(int socket, unsigned char **sharedKey)
 
     if (sharedKeySize == -1)
     {
-        printf("ERROR: Failed to generate shared key! Error: %d\n", ERR_get_error());
+        printf("ERROR: Failed to generate shared key! Error: %lu\n", ERR_get_error());
         free(buffer);
         BN_free(serverPublicKey);
         DH_free(dh);
@@ -259,11 +194,7 @@ int performClientSideDiffieHelmann(int socket, unsigned char **sharedKey)
     BN_free(serverPublicKey);
     DH_free(dh);
 
-    return 0;
+    return sharedKeySize;
 }
-
-
-
-
 
 #endif
