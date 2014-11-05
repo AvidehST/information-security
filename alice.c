@@ -11,6 +11,7 @@
 #include <openssl/dh.h>
 #include <openssl/bio.h>
 #include "settings.h"
+#include "utils.h"
 
 int setupServerSocket()
 {
@@ -44,18 +45,22 @@ int setupServerSocket()
     return serverSocket;
 }
 
-int performServerHandshake(int clientSocket, char *recvBuffer)
+int performServerSideHandshake(int clientSocket)
 {
+    char *buffer = NULL;
 
-    read(clientSocket, recvBuffer, sizeof(recvBuffer)-1);
+    if (receiveString(clientSocket, &buffer) <= 0)
+    {
+        return -1;
+    }
 
-    if(strcmp(recvBuffer, HANDSHAKE_INIT))
+    if (strcmp(buffer, HANDSHAKE_INIT) != 0)
     {
         return -1;
     }
     
-    write(clientSocket, HANDSHAKE_ACK, sizeof(HANDSHAKE_ACK));
-    
+    sendString(clientSocket, HANDSHAKE_ACK);
+
     return 0;
 }
 
@@ -85,45 +90,27 @@ int main(int argc, char *argv[])
         }
 
         // Handshake
-        if(performServerHandshake(clientSocket, recvBuffer) == -1)
+        printf("Perform handshake ...\n");
+
+        if (performServerSideHandshake(clientSocket) == -1)
         {
             printf("ERROR: Handshake with the client failed!");
             continue;
         }
 
-           
-        DH *dh = DH_new();
-        unsigned char *dh_secret = "";
-        BIGNUM *clientPublicKey = BN_new();
-        memset(&recvBuffer[0], 0, sizeof(recvBuffer));
-        read(clientSocket, recvBuffer, sizeof(recvBuffer)-1);
-        BN_dec2bn(&dh->p, recvBuffer);
+        // Diffie-Helmann
+        unsigned char *sharedKey;
 
-        memset(&recvBuffer[0], 0, sizeof(recvBuffer));
-        read(clientSocket, recvBuffer, sizeof(recvBuffer)-1);
-        BN_dec2bn(&dh->g, recvBuffer);
-        
-        memset(&recvBuffer[0], 0, sizeof(recvBuffer));
-        read(clientSocket, recvBuffer, sizeof(recvBuffer)-1);
-        BN_dec2bn(&clientPublicKey, recvBuffer);
-        
-        if(!DH_generate_key(dh)){
-            printf("server key generation error\n");
+        if (performServerSideDiffieHelmann(clientSocket, &sharedKey) == -1)
+        {
+            printf("ERROR: Diffie-Helmann protocol failed!");
+            return EXIT_FAILURE;
         }
-        memset(&sendBuffer[0], 0, sizeof(sendBuffer));
-        snprintf(sendBuffer, sizeof(sendBuffer), "%s", BN_bn2dec(dh->pub_key));
-        write(clientSocket, sendBuffer, sizeof(sendBuffer));
         
+        // Dump the shared key
+        printf("Shared secret key: %s\n", sharedKey);
         
-        dh_secret = OPENSSL_malloc(sizeof(unsigned char) * DH_size(dh));
-        DH_compute_key(dh_secret, clientPublicKey, dh);
-        
-        //printf("Server: shared secret key = %s\n", dh_secret);
-        BIO_dump_fp(stdout, dh_secret, DH_size(dh));
-        
-        DH_free(dh);
-        BN_free(clientPublicKey);
-        free(dh_secret);
+        free(sharedKey);
      }
 
      return 0;

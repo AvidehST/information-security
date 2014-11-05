@@ -11,6 +11,7 @@
 #include <openssl/bn.h>
 #include <openssl/dh.h>
 #include "settings.h"
+#include "utils.h"
 
 int setupSocketToServer()
 {
@@ -27,13 +28,13 @@ int setupSocketToServer()
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(SERVER_PORT); 
 
-    if(inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr) == -1)
+    if (inet_pton(AF_INET, "127.0.0.1", &serverAddress.sin_addr) == -1)
     {
         printf("ERROR: Failed to convert the IP address to binary form! Error: %s\n", strerror(errno));
         exit(EXIT_FAILURE);
     } 
 
-    if(connect(serverSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
+    if (connect(serverSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) < 0)
     {
         printf("ERROR: Failed to connect to server at port %d\"! Error: %s\n", SERVER_PORT, strerror(errno));
         shutdown(serverSocket, SHUT_RDWR);
@@ -44,24 +45,28 @@ int setupSocketToServer()
     return serverSocket;
 }
 
-int performClientHandshake(int serverSocket, char *recvBuffer)
+int performClientSideHandshake(int serverSocket)
 {
-    write(serverSocket, HANDSHAKE_INIT, sizeof(HANDSHAKE_INIT)); 
+    char *buffer = NULL;
 
-    memset(&recvBuffer[0], 0, sizeof(recvBuffer));
-    read(serverSocket, recvBuffer, sizeof(recvBuffer)-1);
+    sendString(serverSocket, HANDSHAKE_INIT);
 
-    if(!strcmp(recvBuffer, HANDSHAKE_ACK))
+    if (receiveString(serverSocket, &buffer) <= 0)
     {
-        return 0;
+        return -1;
     }
 
-    return -1;
+    if (strcmp(buffer, HANDSHAKE_ACK) != 0)
+    {
+        return -1;
+    }
+
+    return 0;
 }
 
 int main(int argc, char *argv[])
 {
-    int serverSocket = 0, n = 0;
+    int serverSocket = 0;
     
     // Setup connection to the server
     printf("Starting client ...\n");
@@ -75,52 +80,29 @@ int main(int argc, char *argv[])
     memset(recvBuffer, '0', sizeof(recvBuffer));
     
     // Handshake
-    if(performClientHandshake(serverSocket, recvBuffer) == -1)
+    printf("Perform handshake ...\n");
+
+    if (performClientSideHandshake(serverSocket) == -1)
     {
         printf("ERROR: Handshake with the server failed!");
         return EXIT_FAILURE;
     }
 
-    DH *dh; 
-    unsigned char *dh_secret = "";
-    BIGNUM *serverPublicKey = BN_new();
-    dh = DH_generate_parameters(256, 2, NULL, NULL);
-    
-    memset(&sendBuffer[0], 0, sizeof(sendBuffer));
-    snprintf(sendBuffer, sizeof(sendBuffer), "%s", BN_bn2dec(dh->p));
-    write(serverSocket, sendBuffer, sizeof(sendBuffer));
-    
-    memset(&sendBuffer[0], 0, sizeof(sendBuffer));
-    snprintf(sendBuffer, sizeof(sendBuffer), "%s", BN_bn2dec(dh->g));
-    write(serverSocket, sendBuffer, sizeof(sendBuffer));
+    // Diffie-Helmann
+    unsigned char *sharedKey;
 
-    if(!DH_generate_key(dh)){
-            printf("client key generation error\n");
-    }
-    memset(&sendBuffer[0], 0, sizeof(sendBuffer));
-    snprintf(sendBuffer, sizeof(sendBuffer), "%s", BN_bn2dec(dh->pub_key));
-    write(serverSocket, sendBuffer, sizeof(sendBuffer));
-    
-    memset(&recvBuffer[0], 0, sizeof(recvBuffer));
-    read(serverSocket, recvBuffer, sizeof(recvBuffer)-1);
-    BN_dec2bn(&serverPublicKey, recvBuffer);
-    
-    
-    dh_secret = OPENSSL_malloc(sizeof(unsigned char) * DH_size(dh));
-    DH_compute_key(dh_secret, serverPublicKey, dh);
-    
-    BIO_dump_fp(stdout, dh_secret, DH_size(dh));
-    //printf("Client: shared secret key = %s\n", dh_secret);
-    
-    DH_free(dh);
-    BN_free(serverPublicKey);
-    free(dh_secret);
-
-
-    if(n < 0)
+    if (performClientSideDiffieHelmann(serverSocket, &sharedKey) == -1)
     {
-        printf("\n Read error \n");
-    } 
+        printf("ERROR: Diffie-Helmann protocol failed!");
+        return EXIT_FAILURE;
+    }
+
+
+    // Dump the shared key
+    printf("Shared secret key: %s\n", sharedKey);
+    
+    
+    free(sharedKey);
 
     return 0;
 }
