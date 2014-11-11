@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
     
     // Setup connection to the server
     printf("Starting client ...\n");
-    serverSocket = setupSocketToServer(SERVER_PORT_FAKED);
+    serverSocket = setupSocketToServer(SERVER_PORT);
     printf("Client started and connected to the server ...\n");
 
     // Handshake
@@ -32,22 +32,25 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // Diffie-Hellman
-    unsigned char *sharedKey;
-    int sharedKeySize;
+    // Challenge Response
+    printf("Perform challenge response ...\n");
+    char *buffer = NULL;
 
-    if ((sharedKeySize = performClientSideDiffieHellman(serverSocket, &sharedKey)) == -1)
+    printf("Send ID ...\n");
+    sendString(serverSocket, "BOB");
+
+    printf("Receive a random number (challenge string) ...\n");
+    if (receiveString(serverSocket, &buffer) <= 0)
     {
-        printf("ERROR: Diffie-Hellman protocol failed!");
-        return EXIT_FAILURE;
+        return -1;
     }
 
+    printf("Perfom challenge and send result ...\n");
+    char *challengeResult = calculateHMAC(buffer);
+    sendString(serverSocket, challengeResult);
 
-    // Dump the shared key
-    printf("Shared secret key: %s\n", sharedKey);
-    
-    
-    free(sharedKey);
+    printf("Done ...\n");
+    free(buffer);
 
     return 0;
 }

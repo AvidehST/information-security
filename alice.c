@@ -39,20 +39,39 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        // Diffie-Hellman
-        unsigned char *sharedKey;
-        int sharedKeySize;
+        // Challenge Response
+        printf("Perform challenge response ...\n");
+        char *buffer = NULL;
 
-        if ((sharedKeySize = performServerSideDiffieHellman(clientSocket, &sharedKey)) == -1)
+        printf("Receiving ID of the client ...\n");
+        if (receiveString(clientSocket, &buffer) <= 0)
         {
-            printf("ERROR: Diffie-Hellman protocol failed!");
-            return EXIT_FAILURE;
+            return -1;
         }
-        
-        // Dump the shared key
-        printf("Shared secret key: %s\n", sharedKey);
-        
-        free(sharedKey);
+
+        printf("Send random number (challenge string) to the client ...\n");
+        char *randomString = generateRandomString(256);
+        sendString(clientSocket, randomString);
+
+        printf("Receive result of challenge and compare with own result ...\n");
+        if (receiveString(clientSocket, &buffer) <= 0)
+        {
+            return -1;
+        }
+
+        char *challengeResult = calculateHMAC(randomString);
+
+        if (strcmp(buffer, challengeResult) == 0)
+        {
+            printf("Bob send a valid result of the challenge!\n");
+        }
+        else
+        {
+            printf("Bob send an invalid result of the challenge!\n");
+        }
+
+        printf("Done ...\n");
+        free(buffer);
      }
 
      return 0;

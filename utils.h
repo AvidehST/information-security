@@ -8,193 +8,44 @@
 #include <openssl/dh.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/evp.h>
 
-/* Diffie-Hellman */
-int performServerSideDiffieHellman(int socket, unsigned char **sharedKey)
+char *generateRandomString(size_t size)
 {
-    DH *dh = DH_new();
-    char *buffer = NULL;
+    const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVW";
+    
+    char *string = malloc(size + 1);
 
-    // Exchange parameters
-    printf("Waiting for client's prime number...\n");
-    if (receiveString(socket, &buffer) <= 0)
+    if (size)
     {
-        return -1;
+        --size;
+        size_t n = 0;
+
+        while(n < size)
+        {
+            int key = rand() % (int) (sizeof charset - 1);
+            string[n] = charset[key];
+            n++;
+        }
+        string[size] = '\0';
     }
 
-    if (!BN_hex2bn(&dh->p, buffer))
-    {
-        printf("ERROR: Failed to convert prime number to BigNum! Error: %lu\n", ERR_get_error());
-        free(buffer);
-        DH_free(dh);
-        return -1;
-    }
-
-    free(buffer);
-    buffer = NULL;
-
-    printf("Waiting for client's generator...\n");
-    if (receiveString(socket, &buffer) <= 0)
-    {
-        free(buffer);
-        return -1;
-    }
-
-    if (!BN_hex2bn(&dh->g, buffer)) {
-        printf("ERROR: Failed to convert generator to BigNum! Error: %lu\n", ERR_get_error());
-        free(buffer);
-        DH_free(dh);
-        return -1;
-    }
-
-    free(buffer);
-    buffer = NULL;
-
-    // Generate keys
-    if(!DH_generate_key(dh))
-    {
-        printf("ERROR: Failed to generate the key!\n");
-        DH_free(dh);
-        return -1;
-    }
-
-    // Exchange keys
-    BIGNUM *clientPublicKey = NULL;
-
-    printf("Waiting for the clients's public key ...\n");
-    if (receiveString(socket, &buffer) <= 0)
-    {
-        DH_free(dh);
-        return -1;
-    }
-
-    if (!BN_hex2bn(&clientPublicKey, buffer))
-    {
-        printf("ERROR: Failed to convert public key to BigNum! Error: %lu\n", ERR_get_error());
-        free(buffer);
-        DH_free(dh);
-        return -1;
-    }
-
-    free(buffer);
-
-    printf("Sending the public key to the client ...\n");
-    if (sendString(socket, BN_bn2hex(dh->pub_key)) == -1)
-    {
-        BN_free(clientPublicKey);
-        DH_free(dh);
-        return -1;
-    }
-
-    // Generate shared key
-    printf("Generate shared key ...\n");
-    if (!(*sharedKey = malloc(DH_size(dh))))
-    {
-        printf("ERROR: Out of memory (%d bytes)!\n", DH_size(dh));
-        free(buffer);
-        BN_free(clientPublicKey);
-        DH_free(dh);
-        return -1;
-    }
-
-    int sharedKeySize = DH_compute_key(*sharedKey, clientPublicKey, dh);
-
-    if (sharedKeySize == -1)
-    {
-        printf("ERROR: Failed to generate shared key! Error: %lu\n", ERR_get_error());
-        free(buffer);
-        BN_free(clientPublicKey);
-        DH_free(dh);
-        free(*sharedKey);
-        *sharedKey = NULL;
-        return -1;
-    }
-
-    BN_free(clientPublicKey);
-    DH_free(dh);
-
-    return sharedKeySize;
+    return string;
 }
 
-int performClientSideDiffieHellman(int socket, unsigned char **sharedKey)
+char* calculateHMAC(char* challenge)
 {
-    DH *dh;
+    unsigned char key[] = "b0ff8318d2b8bdf1542850d66c83f4a921d36ce9ce47d1357eefd8007d620cf83ee4050b5715d0d13c5d85f2877eec2f63b931bd47417a81a538327af927da3e";
+    unsigned char out[EVP_MAX_MD_SIZE];
+    unsigned int outlen;
+    char *res = malloc(outlen + 1);
 
-    // Generate parameters
-    dh = DH_generate_parameters(256, 2, NULL, NULL);
-
-    // Exchange parameters
-    printf("Sending the prime number to the server ...\n");
-    if (sendString(socket, BN_bn2hex(dh->p)) == -1)
+    if (!HMAC(EVP_sha512(), key, sizeof(key)-1, challenge, sizeof(challenge)-1, out, &outlen))
     {
-        return -1;
+        return NULL;
     }
 
-    printf("Sending the generator to the server ...\n");
-    if (sendString(socket, BN_bn2hex(dh->g)) == -1)
-    {
-        return -1;
-    }
-
-    // Generate keys
-    if(!DH_generate_key(dh))
-    {
-        printf("ERROR: Failed to generate the key!\n");
-        DH_free(dh);
-        return -1;
-    }
-
-    // Exchange keys
-    char *buffer = NULL;
-    BIGNUM *serverPublicKey = NULL;
-
-    printf("Sending the public key to the server ...\n");
-    if (sendString(socket, BN_bn2hex(dh->pub_key)) == -1)
-    {
-        return -1;
-    }
-
-    printf("Waiting for the server's public key ...\n");
-    if (receiveString(socket, &buffer) <= 0)
-    {
-        return -1;
-    } 
-
-    if (!BN_hex2bn(&serverPublicKey, buffer))
-    {
-        printf("ERROR: Failed to convert public key to BigNum! Error: %lu\n", ERR_get_error());
-        return -1;
-    }
-
-    // Generate shared key
-    printf("Generate shared key ...\n");
-    if (!(*sharedKey = malloc(DH_size(dh))))
-    {
-        printf("ERROR: Out of memory (%d bytes)!\n", DH_size(dh));
-        free(buffer);
-        BN_free(serverPublicKey);
-        DH_free(dh);
-        return -1;
-    }
-
-    int sharedKeySize = DH_compute_key(*sharedKey, serverPublicKey, dh);
-
-    if (sharedKeySize == -1)
-    {
-        printf("ERROR: Failed to generate shared key! Error: %lu\n", ERR_get_error());
-        free(buffer);
-        BN_free(serverPublicKey);
-        DH_free(dh);
-        free(*sharedKey);
-        *sharedKey = NULL;
-        return -1;
-    }
-
-    free(buffer);
-    BN_free(serverPublicKey);
-    DH_free(dh);
-
-    return sharedKeySize;
+    return strcpy(res, out);
 }
 
 #endif

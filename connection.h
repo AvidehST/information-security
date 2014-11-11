@@ -173,7 +173,7 @@ int receiveString(int socket, char **buffer)
     return 0;
 }
 
-int sendString(const int socket, const char* const buffer)
+int sendString(int socket, char* buffer)
 {
     int res;
 

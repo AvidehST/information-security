@@ -1,4 +1,4 @@
-all: alice bob eve
+all: alice bob
 
 alice:
 	gcc alice.c -o alice -lssl -lcrypto
@@ -6,8 +6,5 @@ alice:
 bob:
 	gcc bob.c -o bob -lssl -lcrypto
 
-eve:
-	gcc eve.c -o eve -lssl -lcrypto
-
 clean:
-	rm alice bob eve
+	rm alice bob
